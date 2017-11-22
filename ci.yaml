@@ -1,0 +1,14 @@
+default-jenkins-slaves:
+   Build: nova-small
+   Release: nova-small
+
+projects:
+  zookeeper:
+    pipeline: simple
+    shell-scripts:
+      ciBuild: zookeeper/cd-scripts/ciBuild.sh
+
+  kafka:
+    pipeline: simple
+    shell-scripts:
+      ciBuild: kafka/cd-scripts/ciBuild.sh
