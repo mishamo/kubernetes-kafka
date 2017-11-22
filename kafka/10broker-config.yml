@@ -1,7 +1,7 @@
 kind: ConfigMap
 metadata:
   name: broker-config
-  namespace: kafka
+  namespace: kafka-pre-prod
 apiVersion: v1
 data:
   init.sh: |-
@@ -24,14 +24,6 @@ data:
       fi
 
       kubectl -n $POD_NAMESPACE label pod $POD_NAME kafka-broker-id=$KAFKA_BROKER_ID
-
-      OUTSIDE_HOST=$(kubectl get node "$NODE_NAME" -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
-      if [ $? -ne 0 ]; then
-        echo "Outside (i.e. cluster-external access) host lookup command failed"
-      else
-        OUTSIDE_HOST=${OUTSIDE_HOST}:3240${KAFKA_BROKER_ID}
-        sed -i "s|#init#advertised.listeners=OUTSIDE://#init#|advertised.listeners=OUTSIDE://${OUTSIDE_HOST}|" /etc/kafka/server.properties
-      fi
     }
 
   server.properties: |-
@@ -68,7 +60,16 @@ data:
     #   EXAMPLE:
     #     listeners = PLAINTEXT://your.host.name:9092
     #listeners=PLAINTEXT://:9092
-    listeners=OUTSIDE://:9094,PLAINTEXT://:9092
+
+    listeners=SSL://:9093
+    advertised.listeners=SSL://:9093
+    security.protocol=SSL
+    ssl.keystore.location=/certificates/server.keystore.jks
+    ssl.keystore.password=password
+    ssl.truststore.location=/certificates/server.truststore.jks
+    ssl.truststore.password=password
+    ssl.client.auth = required
+    security.inter.broker.protocol = SSL
 
     # Hostname and port the broker will advertise to producers and consumers. If not set,
     # it uses the value for "listeners" if configured.  Otherwise, it will use the value
@@ -79,7 +80,7 @@ data:
     # Maps listener names to security protocols, the default is for them to be the same. See the config documentation for more details
     #listener.security.protocol.map=PLAINTEXT:PLAINTEXT,SSL:SSL,SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_SSL:SASL_SSL
     listener.security.protocol.map=PLAINTEXT:PLAINTEXT,SSL:SSL,SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_SSL:SASL_SSL,OUTSIDE:PLAINTEXT
-    inter.broker.listener.name=PLAINTEXT
+    # inter.broker.listener.name=PLAINTEXT
 
     # The number of threads that the server uses for receiving requests from the network and sending responses to the network
     num.network.threads=3
@@ -96,8 +97,33 @@ data:
     # The maximum size of a request that the socket server will accept (protection against OOM)
     socket.request.max.bytes=104857600
 
+    # Add protocol version if enabled
+    inter.broker.protocol.version=0.9.0.0
+    log.message.format.version=0.9.0.0
 
-    ############################# Log Basics #############################
+    ############################# Replication Configs #############################
+    # Enable auto creation of topic on the server. If this is set to true then attempts to produce, consume, or fetch metadata for a non-existent topic will automatically create it with the default replication factor and number of partitions.
+    auto.create.topics.enable=true
+
+    # The default replication factor that applies to auto-created topics. We recommend setting this to at least 2.
+    default.replication.factor=2
+
+    # The minimum number of replicas in ISR needed to commit a produce request with required.acks=-1 (or all).
+    min.insync.replicas=2
+    #Required acks is set to all by default we have no intention of overriding
+    #request.required.acks=all
+
+    # Indicates whether to enable replicas not in the ISR set to be elected as leader as a last resort, even though doing so may result in data loss.
+    unclean.leader.election.enable=false
+
+    # To control leadership migration on shutdown
+    auto.leader.rebalance.enable=true
+
+    # Control restoration of leadership to restored replicas when they rejoin the cluster
+    controlled.shutdown.enable=true
+
+    ############################# Log Basics #########################
+    ####
 
     # A comma seperated list of directories under which to store log files
     log.dirs=/tmp/kafka-logs
@@ -114,7 +140,7 @@ data:
     ############################# Internal Topic Settings  #############################
     # The replication factor for the group metadata internal topics "__consumer_offsets" and "__transaction_state"
     # For anything other than development testing, a value greater than 1 is recommended for to ensure availability such as 3.
-    offsets.topic.replication.factor=1
+    offsets.topic.replication.factor=2
     transaction.state.log.replication.factor=1
     transaction.state.log.min.isr=1
 
@@ -179,94 +205,50 @@ data:
     group.initial.rebalance.delay.ms=0
 
   log4j.properties: |-
-    # Licensed to the Apache Software Foundation (ASF) under one or more
-    # contributor license agreements.  See the NOTICE file distributed with
-    # this work for additional information regarding copyright ownership.
-    # The ASF licenses this file to You under the Apache License, Version 2.0
-    # (the "License"); you may not use this file except in compliance with
-    # the License.  You may obtain a copy of the License at
-    #
-    #    http://www.apache.org/licenses/LICENSE-2.0
-    #
-    # Unless required by applicable law or agreed to in writing, software
-    # distributed under the License is distributed on an "AS IS" BASIS,
-    # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-    # See the License for the specific language governing permissions and
-    # limitations under the License.
+      # Licensed to the Apache Software Foundation (ASF) under one or more
+      # contributor license agreements.  See the NOTICE file distributed with
+      # this work for additional information regarding copyright ownership.
+      # The ASF licenses this file to You under the Apache License, Version 2.0
+      # (the "License"); you may not use this file except in compliance with
+      # the License.  You may obtain a copy of the License at
+      #
+      #    http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
 
-    # Unspecified loggers and loggers with additivity=true output to server.log and stdout
-    # Note that INFO only applies to unspecified loggers, the log level of the child logger is used otherwise
-    log4j.rootLogger=INFO, stdout
+      # Unspecified loggers and loggers with additivity=true output to server.log and stdout
+      # Note that INFO only applies to unspecified loggers, the log level of the child logger is used otherwise
+      log4j.rootLogger=INFO, stdout
 
-    log4j.appender.stdout=org.apache.log4j.ConsoleAppender
-    log4j.appender.stdout.layout=org.apache.log4j.PatternLayout
-    log4j.appender.stdout.layout.ConversionPattern=[%d] %p %m (%c)%n
+      log4j.appender.stdout=org.apache.log4j.ConsoleAppender
+      log4j.appender.stdout.layout=org.apache.log4j.PatternLayout
+      log4j.appender.stdout.layout.ConversionPattern=[%d] %p %m (%c)%n
 
-    log4j.appender.kafkaAppender=org.apache.log4j.DailyRollingFileAppender
-    log4j.appender.kafkaAppender.DatePattern='.'yyyy-MM-dd-HH
-    log4j.appender.kafkaAppender.File=${kafka.logs.dir}/server.log
-    log4j.appender.kafkaAppender.layout=org.apache.log4j.PatternLayout
-    log4j.appender.kafkaAppender.layout.ConversionPattern=[%d] %p %m (%c)%n
 
-    log4j.appender.stateChangeAppender=org.apache.log4j.DailyRollingFileAppender
-    log4j.appender.stateChangeAppender.DatePattern='.'yyyy-MM-dd-HH
-    log4j.appender.stateChangeAppender.File=${kafka.logs.dir}/state-change.log
-    log4j.appender.stateChangeAppender.layout=org.apache.log4j.PatternLayout
-    log4j.appender.stateChangeAppender.layout.ConversionPattern=[%d] %p %m (%c)%n
+      # Change the two lines below to adjust ZK client logging
+      log4j.logger.org.I0Itec.zkclient.ZkClient=INFO
+      log4j.logger.org.apache.zookeeper=INFO
 
-    log4j.appender.requestAppender=org.apache.log4j.DailyRollingFileAppender
-    log4j.appender.requestAppender.DatePattern='.'yyyy-MM-dd-HH
-    log4j.appender.requestAppender.File=${kafka.logs.dir}/kafka-request.log
-    log4j.appender.requestAppender.layout=org.apache.log4j.PatternLayout
-    log4j.appender.requestAppender.layout.ConversionPattern=[%d] %p %m (%c)%n
+      # Change the two lines below to adjust the general broker logging level (output to server.log and stdout)
+      log4j.logger.kafka=INFO
+      log4j.logger.org.apache.kafka=INFO
 
-    log4j.appender.cleanerAppender=org.apache.log4j.DailyRollingFileAppender
-    log4j.appender.cleanerAppender.DatePattern='.'yyyy-MM-dd-HH
-    log4j.appender.cleanerAppender.File=${kafka.logs.dir}/log-cleaner.log
-    log4j.appender.cleanerAppender.layout=org.apache.log4j.PatternLayout
-    log4j.appender.cleanerAppender.layout.ConversionPattern=[%d] %p %m (%c)%n
+      # Change to DEBUG or TRACE to enable request logging
+      log4j.logger.kafka.request.logger=WARN, requestAppender
+      log4j.additivity.kafka.request.logger=false
 
-    log4j.appender.controllerAppender=org.apache.log4j.DailyRollingFileAppender
-    log4j.appender.controllerAppender.DatePattern='.'yyyy-MM-dd-HH
-    log4j.appender.controllerAppender.File=${kafka.logs.dir}/controller.log
-    log4j.appender.controllerAppender.layout=org.apache.log4j.PatternLayout
-    log4j.appender.controllerAppender.layout.ConversionPattern=[%d] %p %m (%c)%n
+      # Uncomment the lines below and change log4j.logger.kafka.network.RequestChannel$ to TRACE for additional output
+      # related to the handling of requests
+      #log4j.logger.kafka.network.Processor=TRACE, requestAppender
+      #log4j.logger.kafka.server.KafkaApis=TRACE, requestAppender
+      #log4j.additivity.kafka.server.KafkaApis=false
+      log4j.logger.kafka.network.RequestChannel$=WARN
+      log4j.additivity.kafka.network.RequestChannel$=false
 
-    log4j.appender.authorizerAppender=org.apache.log4j.DailyRollingFileAppender
-    log4j.appender.authorizerAppender.DatePattern='.'yyyy-MM-dd-HH
-    log4j.appender.authorizerAppender.File=${kafka.logs.dir}/kafka-authorizer.log
-    log4j.appender.authorizerAppender.layout=org.apache.log4j.PatternLayout
-    log4j.appender.authorizerAppender.layout.ConversionPattern=[%d] %p %m (%c)%n
-
-    # Change the two lines below to adjust ZK client logging
-    log4j.logger.org.I0Itec.zkclient.ZkClient=INFO
-    log4j.logger.org.apache.zookeeper=INFO
-
-    # Change the two lines below to adjust the general broker logging level (output to server.log and stdout)
-    log4j.logger.kafka=INFO
-    log4j.logger.org.apache.kafka=INFO
-
-    # Change to DEBUG or TRACE to enable request logging
-    log4j.logger.kafka.request.logger=WARN, requestAppender
-    log4j.additivity.kafka.request.logger=false
-
-    # Uncomment the lines below and change log4j.logger.kafka.network.RequestChannel$ to TRACE for additional output
-    # related to the handling of requests
-    #log4j.logger.kafka.network.Processor=TRACE, requestAppender
-    #log4j.logger.kafka.server.KafkaApis=TRACE, requestAppender
-    #log4j.additivity.kafka.server.KafkaApis=false
-    log4j.logger.kafka.network.RequestChannel$=WARN, requestAppender
-    log4j.additivity.kafka.network.RequestChannel$=false
-
-    log4j.logger.kafka.controller=TRACE, controllerAppender
-    log4j.additivity.kafka.controller=false
-
-    log4j.logger.kafka.log.LogCleaner=INFO, cleanerAppender
-    log4j.additivity.kafka.log.LogCleaner=false
-
-    log4j.logger.state.change.logger=TRACE, stateChangeAppender
-    log4j.additivity.state.change.logger=false
-
-    # Change to DEBUG to enable audit log for the authorizer
-    log4j.logger.kafka.authorizer.logger=WARN, authorizerAppender
-    log4j.additivity.kafka.authorizer.logger=false
+      # Change to DEBUG to enable audit log for the authorizer
+      log4j.logger.kafka.authorizer.logger=WARN
+      log4j.additivity.kafka.authorizer.logger=false

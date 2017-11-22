@@ -1,8 +1,8 @@
-apiVersion: apps/v1beta2
+apiVersion: apps/v1beta1
 kind: StatefulSet
 metadata:
   name: pzoo
-  namespace: kafka
+  namespace: kafka-pre-prod
 spec:
 spec:
   selector:
@@ -30,6 +30,9 @@ spec:
           mountPath: /etc/kafka
         - name: data
           mountPath: /var/lib/zookeeper/data
+        resources:
+          limits:
+            memory: 256Mi
       containers:
       - name: zookeeper
         image: solsson/kafka:1.0.0@sha256:17fdf1637426f45c93c65826670542e36b9f3394ede1cb61885c6a4befa8f72d
@@ -48,8 +51,10 @@ spec:
           name: leader-election
         resources:
           requests:
-            cpu: 10m
-            memory: 100Mi
+            cpu: 100m
+            memory: 800Mi
+          limits:
+            memory: 800Mi
         readinessProbe:
           exec:
             command:
@@ -70,7 +75,7 @@ spec:
       name: data
     spec:
       accessModes: [ "ReadWriteOnce" ]
-      storageClassName: kafka-zookeeper
+      storageClassName: standard
       resources:
         requests:
-          storage: 1Gi
+          storage: 10Gi
